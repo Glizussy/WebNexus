@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebNexus Dashboard</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #f4f6f8; color: #1f2933; }
+  header { background: #1f2d3d; color: #fff; padding: 14px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  section { background: #fff; border-radius: 6px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  h2 { margin: 0 0 12px; font-size: 16px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 12px; }
+  .stat { flex: 1 1 110px; background: #f4f6f8; border-radius: 6px; padding: 10px; text-align: center; }
+  .stat b { display: block; font-size: 22px; }
+  textarea { width: 100%; box-sizing: border-box; height: 70px; font-family: Consolas, monospace; }
+  button { padding: 6px 12px; border: 0; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; }
+  button.secondary { background: #6b7280; }
+  button.danger { background: #dc2626; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; background: #6b7280; }
+  .running { background: #16a34a; } .paused { background: #d97706; } .failed { background: #dc2626; }
+  .completed { background: #2563eb; } .stopped { background: #6b7280; } .queued, .stopping { background: #7c3aed; }
+  #message { min-height: 20px; margin-top: 8px; font-size: 14px; }
+  #message.error { color: #dc2626; } #message.ok { color: #16a34a; }
+  #logs { font-family: Consolas, monospace; font-size: 12px; max-height: 280px; overflow-y: auto; background: #111827; color: #d1d5db; padding: 8px; border-radius: 4px; }
+  .url { word-break: break-all; }
+</style>
+</head>
+<body>
+<header><h1>WebNexus Control Plane</h1></header>
+<main>
+  <section>
+    <h2>Statistics</h2>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section>
+    <h2>Start a crawl</h2>
+    <textarea id="urls" placeholder="One URL per line, e.g. https://quotes.toscrape.com/"></textarea>
+    <p><button id="startBtn">Start crawl</button></p>
+    <div id="message"></div>
+  </section>
+
+  <section>
+    <h2>Crawl runs</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Status</th><th>Seed URLs</th><th>Crawled</th><th>Discovered</th><th>Pending</th><th>Actions</th></tr></thead>
+      <tbody id="runs"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Recent log events</h2>
+    <div id="logs"></div>
+  </section>
+</main>
+
+<script>
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  if (!response.ok) {
+    let detail = "";
+    try { detail = (await response.json()).detail; } catch (e) {}
+    throw new Error(detail || ("HTTP " + response.status));
+  }
+  return response.json();
+}
+
+function showMessage(text, kind) {
+  const el = document.getElementById("message");
+  el.textContent = text;
+  el.className = kind || "";
+}
+
+function renderStats(s) {
+  const labels = ["total_runs","queued","running","paused","completed","failed","stopped"];
+  document.getElementById("stats").innerHTML = labels
+    .map(k => `<div class="stat"><b>${esc(s[k])}</b>${esc(k.replace("_"," "))}</div>`).join("");
+}
+
+function renderRuns(runs) {
+  const rows = runs.slice().reverse().map(r => {
+    const m = r.metrics || {};
+    let actions = "";
+    if (r.status === "running") {
+      actions = `<button class="secondary" data-action="pause" data-id="${esc(r.id)}">Pause</button> `
+              + `<button class="danger" data-action="stop" data-id="${esc(r.id)}">Stop</button>`;
+    } else if (r.status === "paused") {
+      actions = `<button data-action="resume" data-id="${esc(r.id)}">Resume</button> `
+              + `<button class="danger" data-action="stop" data-id="${esc(r.id)}">Stop</button>`;
+    }
+    const error = r.error ? `<br><small style="color:#dc2626">${esc(r.error)}</small>` : "";
+    return `<tr>
+      <td title="${esc(r.id)}">${esc(r.id.slice(0, 8))}</td>
+      <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span>${error}</td>
+      <td class="url">${esc((r.urls || []).join(", "))}</td>
+      <td>${esc(m.pages_crawled ?? 0)}</td>
+      <td>${esc(m.urls_discovered ?? 0)}</td>
+      <td>${esc(m.queue_pending ?? 0)}</td>
+      <td>${actions}</td></tr>`;
+  });
+  document.getElementById("runs").innerHTML = rows.join("") || `<tr><td colspan="7">No runs yet.</td></tr>`;
+}
+
+function renderLogs(logs) {
+  const el = document.getElementById("logs");
+  el.innerHTML = logs.slice().reverse().map(e =>
+    `${esc((e.timestamp_utc || "").slice(11, 19))} [${esc((e.job_id || "").slice(0, 8))}] ${esc(e.event_type)} ${esc(e.status_code ?? "")} ${esc(e.url ?? "")}`
+  ).join("<br>") || "No events yet.";
+}
+
+async function refresh() {
+  try {
+    const [stats, runs, logs] = await Promise.all([
+      api("/api/stats"), api("/api/runs"), api("/api/logs?limit=50")
+    ]);
+    renderStats(stats);
+    renderRuns(runs.runs);
+    renderLogs(logs.logs);
+  } catch (err) {
+    showMessage("Cannot reach the API: " + err.message, "error");
+  }
+}
+
+document.getElementById("startBtn").addEventListener("click", async () => {
+  const urls = document.getElementById("urls").value.split("\n").map(u => u.trim()).filter(Boolean);
+  if (urls.length === 0) { showMessage("Please enter at least one URL.", "error"); return; }
+  try {
+    const job = await api("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls })
+    });
+    showMessage("Crawl started: " + job.id, "ok");
+    refresh();
+  } catch (err) {
+    showMessage("Could not start the crawl: " + err.message, "error");
+  }
+});
+
+document.getElementById("runs").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  try {
+    await api(`/api/runs/${button.dataset.id}/${button.dataset.action}`, { method: "POST" });
+    showMessage(`Action "${button.dataset.action}" sent.`, "ok");
+    refresh();
+  } catch (err) {
+    showMessage(`Action "${button.dataset.action}" failed: ${err.message}`, "error");
+  }
+});
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
