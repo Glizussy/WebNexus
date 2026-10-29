@@ -18,7 +18,7 @@ sources 1---n crawl_targets 1---1 documents 1---n document_versions
 | `sources` | One row per configured website. Holds type, base URL, crawl delay, extractor options. |
 | `crawl_runs` | One row per crawl execution: status, trigger, timing, stats JSON. |
 | `crawl_targets` | URL frontier mirror. Unique canonical URL, priority, retry count, ETag/Last-Modified and `next_crawl_at` for incremental crawling. |
-| `documents` | Normalized pages. Unique canonical URL, content hash, SimHash, metadata, keyword array, version counter. |
+| `documents` | Normalized pages. Unique canonical URL, content hash, SimHash, generated `search_vector`, keyword relevance, metadata, version counter. |
 | `document_versions` | Change history: only `content_hash`, `changed_fields`, optional snapshot — not full bodies. |
 | `duplicates` | Rejected duplicate candidates (URL + hash + method + similarity) pointing at the surviving document. The duplicate itself is never inserted into `documents`. |
 | `keywords` | Configurable search terms with match type and weight. |
@@ -59,7 +59,46 @@ so the dashboard can report savings without losing provenance.
   dashboard's per-source latest-documents view.
 - GIN on `documents.keywords` and `documents.meta` supports keyword/report
   filtering without a separate search cluster.
+- GIN on `documents.search_vector` powers ranked full-text search; see below.
 - `ix_crawl_logs_level_created_at (level, created_at)` backs the error feed.
+
+## Full-text search and relevance
+
+`documents.search_vector` is a stored generated `tsvector`:
+
+```sql
+setweight(to_tsvector('simple'::regconfig, coalesce(title, '')), 'A') ||
+setweight(to_tsvector('simple'::regconfig, coalesce(summary, '')), 'B') ||
+setweight(to_tsvector('simple'::regconfig, coalesce(body_text, '')), 'C')
+```
+
+`simple` keeps search language-neutral; it tokenizes but does not stem, so
+index and query terms must share the same stem (search "crawl", not "crawl"
+for "crawlers"). Title hits rank above summary, which rank above body hits.
+
+`documents.relevance` is recomputed whenever configured keywords match:
+`sum(occurrence * weight) * 1000 / max(1, word_count)` — weighted hits per
+1,000 words. It is independent of the query-time `ts_rank_cd` score.
+
+```python
+from webnexus.storage import DocumentSearch
+
+with session_factory() as session:
+    searcher = DocumentSearch(session)
+    hits = searcher.search(
+        "quantum computing",
+        source_id=source_id,
+        language="en",
+        published_after=cutoff,
+        limit=20,
+        offset=0,
+    )
+    total = searcher.count("quantum computing", source_id=source_id)
+```
+
+`SearchHit` exposes `document_id`, `title`, `url`, `source_id`,
+`published_at`, `language`, `relevance`, query-time `rank`, and a
+`ts_headline` snippet with `<<` / `>>` markers around matches.
 
 ## Dashboard queries this schema supports
 
@@ -78,4 +117,11 @@ GROUP BY s.name ORDER BY docs DESC;
 
 -- dedup savings
 SELECT method, count(*) FROM duplicates GROUP BY method;
+
+-- ranked full-text search
+SELECT id, title, ts_rank_cd(search_vector, q) AS rank
+FROM documents, websearch_to_tsquery('simple', 'quantum computing') AS q
+WHERE search_vector @@ q
+ORDER BY rank DESC
+LIMIT 20;
 ```

@@ -11,6 +11,7 @@ from webnexus.storage.models import (
     Keyword,
     Source,
 )
+from webnexus.storage.search import DocumentSearch, SearchHit
 
 __all__ = [
     "Base",
@@ -19,9 +20,11 @@ __all__ = [
     "CrawlTarget",
     "Document",
     "DocumentKeyword",
+    "DocumentSearch",
     "DocumentVersion",
     "Duplicate",
     "Keyword",
+    "SearchHit",
     "Source",
     "create_db_engine",
     "create_session_factory",

@@ -224,6 +224,22 @@ def test_fetch_canonical_url_wins_over_rel_canonical() -> None:
     assert record.canonical_url == "https://example.com/canonical"
 
 
+def test_language_detected_from_content_when_missing() -> None:
+    html = (
+        "<html><body><article><h1>Open data guidance</h1>"
+        "<p>Modern web crawlers must respect robots directives and throttle requests "
+        "to avoid overloading small websites.</p>"
+        "<p>These rules apply to public agencies and research repositories that publish "
+        "machine readable datasets for automated collection.</p>"
+        "</article></body></html>"
+    )
+    source = make_source(SourceType.NEWS, extractor="news_article")
+    result = make_fetch(html, source_id=source.id)
+    record = REGISTRY.for_source(source).extract(result, source)
+    assert record is not None
+    assert record.language == "en"
+
+
 def test_non_ascii_content_is_decoded() -> None:
     html = (
         "<html lang='fr'><body><article><h1>Résumé</h1>"

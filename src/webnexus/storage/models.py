@@ -24,6 +24,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     DateTime,
     Float,
     ForeignKey,
@@ -35,7 +36,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from webnexus.contracts import models as c
@@ -47,6 +48,12 @@ NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
+SEARCH_VECTOR_EXPR = (
+    "setweight(to_tsvector('simple'::regconfig, coalesce(title, '')), 'A') || "
+    "setweight(to_tsvector('simple'::regconfig, coalesce(summary, '')), 'B') || "
+    "setweight(to_tsvector('simple'::regconfig, coalesce(body_text, '')), 'C')"
+)
 
 
 class Base(DeclarativeBase):
@@ -194,6 +201,8 @@ class Document(Base):
         Index("ix_documents_source_published", "source_id", "published_at"),
         Index("ix_documents_keywords_gin", "keywords", postgresql_using="gin"),
         Index("ix_documents_meta_gin", "meta", postgresql_using="gin"),
+        Index("ix_documents_search_vector", "search_vector", postgresql_using="gin"),
+        Index("ix_documents_relevance", "relevance"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -222,9 +231,15 @@ class Document(Base):
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     body_text: Mapped[str] = mapped_column(Text, nullable=False, server_default=sa.text("''"))
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(SEARCH_VECTOR_EXPR, persisted=True),
+        nullable=True,
+    )
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     simhash: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     word_count: Mapped[int] = mapped_column(sa.Integer, server_default=sa.text("0"), nullable=False)
+    relevance: Mapped[float] = mapped_column(Float, server_default=sa.text("0"), nullable=False)
     keywords: Mapped[list[str]] = mapped_column(
         ARRAY(Text), server_default=sa.text("'{}'::text[]"), nullable=False
     )

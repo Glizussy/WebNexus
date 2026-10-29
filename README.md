@@ -9,7 +9,7 @@ government sites.
 | Area | State |
 |---|---|
 | Acquisition (`crawler/`, Person A) | Fetching, robots.txt (RFC 9309), per-host rate limits, SSRF defense, URL frontier, scheduler, SQLite crawl state, retries. |
-| Pipeline + storage (`src/webnexus/`, Person B) | Versioned contracts, Postgres schema + Alembic, five source extractors, keyword matching, exact/SimHash dedup, raw body store. |
+| Pipeline + storage (`src/webnexus/`, Person B) | Versioned contracts, Postgres schema + Alembic, five source extractors, language detection, keyword matching + relevance, exact/SimHash dedup, raw body store, Postgres full-text search. |
 | A → B bridge (`src/webnexus/integration/`) | Converts A's fetch results/events into B's contracts and wires `set_pipeline_handler` → `PipelineService`. |
 | API/dashboard (`api/`, `web/`, Person C) | Not yet implemented. |
 
@@ -40,7 +40,7 @@ src/webnexus/                Person B: pipeline + storage
   contracts/                 shared Pydantic handoffs (v1.0.0)
   pipeline/                  extractors, keywords, dedup, sink, service
   integration/               A -> B fetch/event bridge and engine wiring
-  storage/                   SQLAlchemy models, engine/session helpers
+  storage/                   SQLAlchemy models, search, engine/session helpers
 
 migrations/                  Alembic migrations (initial schema)
 docs/                        contracts, schema, and acquisition reference
@@ -103,6 +103,15 @@ await engine.run()
 For multiple sources, pass `source_resolver=lambda source_id: load_source(source_id)`
 instead of `source`. Events can be forwarded to Person C with
 `event_sink=callback`; A's event types map to the shared `CrawlEvent` model.
+
+Full-text search over stored documents:
+
+```python
+from webnexus.storage import DocumentSearch
+
+with session_factory() as session:
+    hits = DocumentSearch(session).search("quantum computing", limit=20)
+```
 
 ## Contracts
 

@@ -37,6 +37,7 @@ from webnexus.pipeline.html import (
     primary_jsonld,
     strip_html,
 )
+from webnexus.pipeline.language import detect_language
 
 MAX_TITLE = 2000
 MAX_SUMMARY = 2000
@@ -144,6 +145,7 @@ class BaseExtractor:
         published_at = content.published_at or common.published_at
         title = clean_text(content.title or common.title)[:MAX_TITLE]
         summary = clean_text(content.summary or common.summary or "")[:MAX_SUMMARY]
+        language = detect_language(body, content.language or common.language)
 
         return NormalizedRecord(
             source_id=source_id,
@@ -153,7 +155,7 @@ class BaseExtractor:
             title=title,
             author=clean_text(content.author or common.author or "")[:512] or None,
             published_at=published_at,
-            language=content.language or common.language,
+            language=language,
             body_text=body,
             summary=summary or None,
             content_hash=sha256_text(body),

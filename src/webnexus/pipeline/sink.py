@@ -16,7 +16,7 @@ from webnexus.contracts import (
     utcnow,
 )
 from webnexus.pipeline.dedup import DedupConfig, DedupEngine
-from webnexus.pipeline.keywords import KeywordMatcher
+from webnexus.pipeline.keywords import KeywordMatch, KeywordMatcher
 from webnexus.storage.models import (
     Document,
     DocumentKeyword,
@@ -235,6 +235,7 @@ class PostgresSink:
         document.keywords = [
             term for term, _ in sorted(terms, key=lambda item: (-item[1], item[0]))
         ][:25]
+        document.relevance = _relevance(matches, document.word_count)
 
 
 def _changed_fields(document: Document, record: NormalizedRecord) -> list[str]:
@@ -269,3 +270,11 @@ def _snapshot(record: NormalizedRecord) -> dict[str, Any]:
         "body_text": record.body_text,
         "meta": record.meta,
     }
+
+
+def _relevance(matches: list[KeywordMatch], word_count: int) -> float:
+    """Weighted keyword hits per 1,000 words."""
+    if not matches:
+        return 0.0
+    total = sum(match.score for match in matches)
+    return round(total * 1000 / max(1, word_count), 4)

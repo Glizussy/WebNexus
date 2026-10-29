@@ -36,6 +36,7 @@ from webnexus.contracts import (
     simhash_text,
     tokenize,
 )
+from webnexus.integration import CrawlerPipelineHandler
 from webnexus.pipeline import (
     DedupConfig,
     KeywordMatcher,
@@ -43,7 +44,6 @@ from webnexus.pipeline import (
     PipelineService,
     PostgresSink,
 )
-from webnexus.integration import CrawlerPipelineHandler
 from webnexus.storage import create_db_engine, create_session_factory
 from webnexus.storage.models import (
     Document,
@@ -146,6 +146,7 @@ def test_first_persist_inserts_document_and_version(factory, source_id) -> None:
         document = session.get(Document, outcome.document_id)
         assert document is not None
         assert document.version == 1
+        assert document.relevance == 0.0
         assert count(session, Document) == 1
         versions = session.scalars(select(DocumentVersion)).all()
         assert [version.version for version in versions] == [1]
@@ -265,6 +266,7 @@ def test_keywords_are_linked_and_cleared_on_update(factory, source_id) -> None:
         assert link.occurrences == 2
         assert link.score == 4.0
         assert count(session, Keyword) == 1
+        assert document.relevance == pytest.approx(4 / 3 * 1000)
 
     outcome = sink.persist(record(source_id, "data only", url=url))
     assert outcome.status == "updated"
@@ -273,6 +275,7 @@ def test_keywords_are_linked_and_cleared_on_update(factory, source_id) -> None:
         document = session.get(Document, outcome.document_id)
         assert document is not None
         assert document.keywords == []
+        assert document.relevance == 0.0
         assert count(session, DocumentKeyword) == 0
         assert count(session, Keyword) == 1
 
