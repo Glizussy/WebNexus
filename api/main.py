@@ -1,6 +1,7 @@
 """WebNexus Control Plane API."""
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -15,7 +16,25 @@ from pydantic import BaseModel, Field
 from crawler import CrawlerEngine
 from crawler.config import CrawlerConfig
 
-logging.basicConfig(level=logging.INFO)
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        job_id = getattr(record, "job_id", None)
+        if job_id:
+            payload["job_id"] = job_id
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload)
+
+
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(JsonFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[_log_handler])
 logger = logging.getLogger("webnexus.api")
 
 app = FastAPI(
@@ -88,6 +107,7 @@ async def execute_job(job: CrawlJob) -> None:
     try:
         job.status = "running"
         job.started_at = datetime.now(timezone.utc).isoformat()
+        logger.info("Crawl job started", extra={"job_id": job.id})
 
         added_count = await engine.add_seed_urls(job.urls)
 
@@ -110,6 +130,7 @@ async def execute_job(job: CrawlJob) -> None:
         if job.status == "stopping":
             job.status = "stopped"
             job.finished_at = datetime.now(timezone.utc).isoformat()
+            logger.info("Crawl job finished with status %s", job.status, extra={"job_id": job.id})
 @app.get("/")
 async def home():
     return {
