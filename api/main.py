@@ -3,23 +3,25 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
-from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from crawler import CrawlerEngine
 from crawler.config import CrawlerConfig
 
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -53,7 +55,7 @@ class CrawlJob:
         self.id = str(uuid4())
         self.urls = urls
         self.status = "queued"
-        self.created_at = datetime.now(timezone.utc).isoformat()
+        self.created_at = datetime.now(UTC).isoformat()
         self.started_at: str | None = None
         self.finished_at: str | None = None
         self.error: str | None = None
@@ -106,7 +108,7 @@ async def execute_job(job: CrawlJob) -> None:
 
     try:
         job.status = "running"
-        job.started_at = datetime.now(timezone.utc).isoformat()
+        job.started_at = datetime.now(UTC).isoformat()
         logger.info("Crawl job started", extra={"job_id": job.id})
 
         added_count = await engine.add_seed_urls(job.urls)
@@ -129,7 +131,7 @@ async def execute_job(job: CrawlJob) -> None:
     finally:
         if job.status == "stopping":
             job.status = "stopped"
-            job.finished_at = datetime.now(timezone.utc).isoformat()
+            job.finished_at = datetime.now(UTC).isoformat()
             logger.info("Crawl job finished with status %s", job.status, extra={"job_id": job.id})
 @app.get("/")
 async def home():
