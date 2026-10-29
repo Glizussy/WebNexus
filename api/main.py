@@ -131,9 +131,11 @@ async def execute_job(job: CrawlJob) -> None:
     finally:
         if job.status == "stopping":
             job.status = "stopped"
-            job.finished_at = datetime.now(UTC).isoformat()
-            logger.info("Crawl job finished with status %s", job.status, extra={"job_id": job.id})
+        job.finished_at = datetime.now(UTC).isoformat()
+        logger.info("Crawl job finished with status %s", job.status, extra={"job_id": job.id})
+
 @app.get("/")
+
 async def home():
     return {
         "message": "Welcome to WebNexus",
