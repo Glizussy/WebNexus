@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "web-crawler-acquisition"
+version = "0.1.0"
+description = "High-performance, secure, RFC-compliant web crawler acquisition module (Person A)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Person A - Crawler Team", email = "crawler-acquisition@academic-research.org" }
+]
+dependencies = [
+    "aiohttp>=3.10.0",
+    "lxml>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+python_classes = ["Test*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
