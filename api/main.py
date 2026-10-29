@@ -9,6 +9,7 @@ from uuid import uuid4
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from crawler import CrawlerEngine
@@ -216,6 +217,35 @@ async def get_logs(limit: int = 100):
         for event in job.events
     ]
     return {"logs": events[-limit:]}
+
+@app.get("/api/metrics", response_class=PlainTextResponse)
+async def get_metrics():
+    status_counts: dict[str, int] = {}
+    for job in jobs.values():
+        status_counts[job.status] = status_counts.get(job.status, 0) + 1
+
+    keys = [
+        "pages_crawled",
+        "pages_succeeded",
+        "pages_failed",
+        "pages_not_modified",
+        "pages_robots_blocked",
+        "pages_ssrf_blocked",
+        "urls_discovered",
+    ]
+    totals = {key: 0 for key in keys}
+    for job in jobs.values():
+        metrics = job.engine.get_metrics() if job.engine else {}
+        for key in keys:
+            totals[key] += metrics.get(key, 0)
+
+    lines = ["# TYPE webnexus_runs gauge"]
+    for status, count in sorted(status_counts.items()):
+        lines.append(f'webnexus_runs{{status="{status}"}} {count}')
+    for key in keys:
+        lines.append(f"# TYPE webnexus_{key} gauge")
+        lines.append(f"webnexus_{key} {totals[key]}")
+    return "\n".join(lines) + "\n"
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 if WEB_DIR.is_dir():
