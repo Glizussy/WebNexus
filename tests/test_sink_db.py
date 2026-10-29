@@ -17,6 +17,10 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select, text
 
+from crawler.models import (
+    FetchResult as CrawlerFetchResult,
+    FetchStatus,
+)
 from webnexus.contracts import (
     DocumentKind,
     DuplicateMethod,
@@ -39,6 +43,7 @@ from webnexus.pipeline import (
     PipelineService,
     PostgresSink,
 )
+from webnexus.integration import CrawlerPipelineHandler
 from webnexus.storage import create_db_engine, create_session_factory
 from webnexus.storage.models import (
     Document,
@@ -336,3 +341,40 @@ def test_pipeline_service_end_to_end(factory, source_id, tmp_path) -> None:
         error=FetchError(code=ErrorCode.TIMEOUT, message="timeout", retryable=True),
     )
     assert service.process(failed, source).reason == "fetch_error:timeout"
+
+
+def test_crawler_bridge_end_to_end(factory, source_id) -> None:
+    config = SourceConfig(
+        id=source_id,
+        name="Example News",
+        base_url="https://example.com",
+        source_type=SourceType.NEWS,
+        extractor="news_article",
+    )
+    html = (FIXTURES / "news.html").read_text(encoding="utf-8")
+    crawler_result = CrawlerFetchResult(
+        requested_url="https://example.com/news/ai-crawlers",
+        final_url="https://example.com/news/ai-crawlers",
+        status=FetchStatus.SUCCESS,
+        status_code=200,
+        body=html.encode("utf-8"),
+        text=html,
+        content_type="text/html; charset=utf-8",
+        encoding="utf-8",
+        latency_ms=42.5,
+        metadata={"source_id": str(source_id)},
+    )
+    handler = CrawlerPipelineHandler(PipelineService(PostgresSink(factory)), config)
+
+    outcome = handler(crawler_result)
+
+    assert outcome.status == "inserted"
+    with factory() as session:
+        document = session.get(Document, outcome.document_id)
+        assert document is not None
+        assert document.source_id == source_id
+        assert document.canonical_url == "https://example.com/news/ai-crawlers"
+        assert document.title == "AI crawlers get smarter"
+        assert document.meta["extractor"] == "news_article"
+
+    assert handler(crawler_result).status == "unchanged"

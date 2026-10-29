@@ -8,14 +8,21 @@ government sites.
 
 | Area | State |
 |---|---|
-| Acquisition (`crawler/`, Person A) | Fetching, robots.txt (RFC 9309), per-host rate limits, SSRF defense, URL frontier, scheduler, SQLite crawl state, retries. 69 tests. |
-| Pipeline + storage (`src/webnexus/`, Person B) | Versioned contracts, Postgres schema + Alembic, five source extractors, keyword matching, exact/SimHash dedup, raw body store. 65 tests incl. Postgres. |
+| Acquisition (`crawler/`, Person A) | Fetching, robots.txt (RFC 9309), per-host rate limits, SSRF defense, URL frontier, scheduler, SQLite crawl state, retries. |
+| Pipeline + storage (`src/webnexus/`, Person B) | Versioned contracts, Postgres schema + Alembic, five source extractors, keyword matching, exact/SimHash dedup, raw body store. |
+| A → B bridge (`src/webnexus/integration/`) | Converts A's fetch results/events into B's contracts and wires `set_pipeline_handler` → `PipelineService`. |
 | API/dashboard (`api/`, `web/`, Person C) | Not yet implemented. |
 
-The two halves are merged in one repo but still speak **different FetchResult
-models**: `crawler.models.FetchResult` (dataclass, produced by A) and
-`webnexus.contracts.FetchResult` (Pydantic, consumed by B). An adapter is the
-next integration task; see `docs/contracts.md` for the target shape.
+The two halves use different `FetchResult` models by design:
+`crawler.models.FetchResult` (dataclass, produced by A) and
+`webnexus.contracts.FetchResult` (Pydantic, consumed by B). The bridge in
+`src/webnexus/integration/crawler_bridge.py` is the only code that knows both.
+
+```python
+from webnexus.integration import attach_pipeline
+
+attach_pipeline(engine, pipeline_service, source=source_config, event_sink=record_event)
+```
 
 ## Layout
 
@@ -32,6 +39,7 @@ crawler/                     Person A: async acquisition engine
 src/webnexus/                Person B: pipeline + storage
   contracts/                 shared Pydantic handoffs (v1.0.0)
   pipeline/                  extractors, keywords, dedup, sink, service
+  integration/               A -> B fetch/event bridge and engine wiring
   storage/                   SQLAlchemy models, engine/session helpers
 
 migrations/                  Alembic migrations (initial schema)
@@ -70,6 +78,32 @@ Crawler-only demo:
 python demo.py
 ```
 
+## Wiring the crawler to the pipeline
+
+```python
+from webnexus.contracts import SourceConfig, SourceType
+from webnexus.integration import attach_pipeline
+from webnexus.pipeline import PipelineService, PostgresSink, build_default_registry
+from webnexus.storage import create_db_engine, create_session_factory
+
+source = SourceConfig(
+    id=source_uuid,
+    name="Example News",
+    base_url="https://example.com",
+    source_type=SourceType.NEWS,
+    extractor="news_article",
+)
+service = PipelineService(PostgresSink(create_session_factory(create_db_engine())))
+attach_pipeline(engine, service, source=source)
+
+await engine.add_seed_url("https://example.com/feed.xml", source_id=str(source.id))
+await engine.run()
+```
+
+For multiple sources, pass `source_resolver=lambda source_id: load_source(source_id)`
+instead of `source`. Events can be forwarded to Person C with
+`event_sink=callback`; A's event types map to the shared `CrawlEvent` model.
+
 ## Contracts
 
 - `docs/contracts.md` — `FetchResult`, `NormalizedRecord`, `CrawlEvent`, config,
@@ -84,7 +118,7 @@ python demo.py
 | Person | Area |
 |---|---|
 | A | `crawler/` — acquisition, robots, rate limits, frontier, scheduler |
-| B | `src/webnexus/pipeline/`, `src/webnexus/storage/`, `src/webnexus/contracts/` |
+| B | `src/webnexus/pipeline/`, `src/webnexus/storage/`, `src/webnexus/contracts/`, `src/webnexus/integration/` |
 | C | `api/`, `web/`, orchestration, dashboard, ops |
 
 Contracts in `src/webnexus/contracts/` and `crawler/models.py` require team
