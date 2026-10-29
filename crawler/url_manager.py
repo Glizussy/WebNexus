@@ -127,10 +127,10 @@ def canonicalize_url(url: str, strip_tracking: bool = True) -> str:
     raw_path = split.path or "/"
     # Collapse multiple slashes
     raw_path = re.sub(r"/+", "/", raw_path)
-    
+
     # Preserve trailing slash intent if original path ended with '/' and isn't just '/'
     ends_with_slash = raw_path.endswith("/") and raw_path != "/"
-    
+
     normalized_path = posixpath.normpath(raw_path)
     if not normalized_path.startswith("/"):
         normalized_path = "/" + normalized_path
