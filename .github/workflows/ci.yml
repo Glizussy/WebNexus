@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, integration, crawler]
+  pull_request:
+    branches: [main, master, integration, crawler]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: webnexus
+          POSTGRES_PASSWORD: webnexus
+          POSTGRES_DB: webnexus
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U webnexus -d webnexus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://webnexus:webnexus@localhost:5433/webnexus
+      WEBNEXUS_TEST_DATABASE_URL: postgresql+psycopg://webnexus:webnexus@localhost:5433/webnexus_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Create test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U webnexus -d postgres -c "CREATE DATABASE webnexus_test;"
+
+      - name: Apply migrations
+        run: alembic upgrade head
+
+      - name: Lint pipeline
+        run: ruff check src
+
+      - name: Check crawler for fatal errors
+        run: ruff check crawler --select E9,F63,F7,F82
+
+      - name: Run test suite
+        run: pytest -v --tb=short
