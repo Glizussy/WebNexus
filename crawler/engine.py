@@ -148,6 +148,7 @@ class CrawlerEngine:
         priority: float = 10.0,
         depth: int = 0,
         metadata: dict[str, Any] | None = None,
+        source_id: str | None = None,
     ) -> bool:
         """Add an initial seed URL to the crawler priority queue."""
         req = CrawlRequest(
@@ -155,6 +156,7 @@ class CrawlerEngine:
             priority=priority,
             depth=depth,
             metadata=metadata or {},
+            source_id=source_id,
         )
         scheduled = await self.scheduler.schedule(req, force=True)
         if scheduled:
@@ -319,6 +321,7 @@ class CrawlerEngine:
                 )
             )
             await self.scheduler.record_outcome(result)
+            self._propagate_source_id(req, result)
             await self._dispatch_result(result)
             return
 
@@ -408,9 +411,16 @@ class CrawlerEngine:
 
         # 6. Record State & Persist
         await self.scheduler.record_outcome(result)
+        self._propagate_source_id(req, result)
 
         # 7. Hand Off to Person B Pipeline
         await self._dispatch_result(result)
+
+    @staticmethod
+    def _propagate_source_id(req: CrawlRequest, result: FetchResult) -> None:
+        """Tag the fetch result so downstream pipeline handlers can resolve the source."""
+        if req.source_id and "source_id" not in result.metadata:
+            result.metadata["source_id"] = req.source_id
 
     async def close(self) -> None:
         """Shut down resources, sessions, and state stores."""

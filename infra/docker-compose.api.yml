@@ -1,0 +1,21 @@
+# Run from the repository root:
+#   docker compose -f docker-compose.yml -f infra/docker-compose.api.yml up --build
+# UNTESTED: written without Docker available.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://webnexus:webnexus@db:5432/webnexus
+    volumes:
+      - api_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  api_data:
