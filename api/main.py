@@ -14,6 +14,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from api.control import create_router
 from crawler import CrawlerEngine
 from crawler.config import CrawlerConfig
 
@@ -150,12 +151,16 @@ async def health():
     return {"status": "ok", "service": "WebNexus API"}
 
 
-@app.post("/api/runs", status_code=202)
-async def create_run(request: CreateRunRequest):
-    job = CrawlJob(request.urls)
+def start_job(urls: list[str]) -> CrawlJob:
+    job = CrawlJob(urls)
     jobs[job.id] = job
     job.task = asyncio.create_task(execute_job(job))
-    return job.to_dict()
+    return job
+
+
+@app.post("/api/runs", status_code=202)
+async def create_run(request: CreateRunRequest):
+    return start_job(request.urls).to_dict()
 
 
 @app.get("/api/runs")
@@ -271,6 +276,8 @@ async def get_metrics():
         lines.append(f"# TYPE webnexus_{key} gauge")
         lines.append(f"webnexus_{key} {totals[key]}")
     return "\n".join(lines) + "\n"
+
+app.include_router(create_router(jobs))
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 if WEB_DIR.is_dir():

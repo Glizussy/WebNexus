@@ -1,11 +1,11 @@
+import asyncio
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from api.main import CrawlJob, app, execute_job, extract_allowed_domains  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-
-from api.main import app, extract_allowed_domains  # noqa: E402
 
 client = TestClient(app)
 
@@ -66,3 +66,11 @@ def test_dashboard_is_served():
     response = client.get("/dashboard/")
     assert response.status_code == 200
     assert "WebNexus" in response.text
+
+
+def test_finished_at_is_set_when_job_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    job = CrawlJob(["notaurl"])
+    asyncio.run(execute_job(job))
+    assert job.status == "failed"
+    assert job.finished_at is not None

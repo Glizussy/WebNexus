@@ -54,6 +54,30 @@
   </section>
 
   <section>
+    <h2>Sources</h2>
+    <p>
+      <input id="srcName" placeholder="Name"> <input id="srcUrl" placeholder="https://example.com" size="30">
+      <select id="srcType"><option>news</option><option>blog</option><option>ecommerce</option><option>research</option><option>government</option></select>
+      <button id="addSourceBtn">Add source</button>
+    </p>
+    <table>
+      <thead><tr><th>Name</th><th>Type</th><th>Base URL</th><th>Health</th><th>Runs</th><th>Actions</th></tr></thead>
+      <tbody id="sources"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Keywords</h2>
+    <p><input id="kwTerm" placeholder="keyword"> <button id="addKeywordBtn">Add keyword</button></p>
+    <div id="keywords"></div>
+  </section>
+
+  <section>
+    <h2>Recent errors</h2>
+    <div id="errors"></div>
+  </section>
+
+  <section>
     <h2>Recent log events</h2>
     <div id="logs"></div>
   </section>
@@ -117,14 +141,46 @@ function renderLogs(logs) {
   ).join("<br>") || "No events yet.";
 }
 
+
+function renderSources(sources, health) {
+  const byId = {};
+  health.forEach(h => { byId[h.source_id] = h; });
+  const rows = sources.map(src => {
+    const h = byId[src.id] || {};
+    return `<tr><td>${esc(src.name)}</td><td>${esc(src.source_type)}</td>
+      <td class="url">${esc(src.base_url)}</td>
+      <td><span class="badge ${h.health === "healthy" ? "running" : h.health === "unhealthy" ? "failed" : h.health === "degraded" ? "paused" : "stopped"}">${esc(h.health || "unknown")}</span></td>
+      <td>${esc(h.runs ?? 0)}</td>
+      <td><button data-src-action="run" data-id="${esc(src.id)}">Run</button>
+          <button class="danger" data-src-action="delete" data-id="${esc(src.id)}">Delete</button></td></tr>`;
+  });
+  document.getElementById("sources").innerHTML = rows.join("") || `<tr><td colspan="6">No sources yet.</td></tr>`;
+}
+
+function renderKeywords(items) {
+  document.getElementById("keywords").innerHTML = items.map(k =>
+    `<span class="badge stopped">${esc(k.term)} <a href="#" data-kw="${esc(k.term)}" style="color:#fff">x</a></span> `
+  ).join("") || "No keywords yet.";
+}
+
+function renderErrors(items) {
+  document.getElementById("errors").innerHTML = items.slice().reverse().slice(0, 30).map(e =>
+    `${esc((e.timestamp_utc || "").slice(11, 19))} [${esc((e.job_id || "").slice(0, 8))}] ${esc(e.kind)} ${esc(e.url ?? "")} ${esc(e.message ?? "")}`
+  ).join("<br>") || "No errors.";
+}
+
 async function refresh() {
   try {
-    const [stats, runs, logs] = await Promise.all([
-      api("/api/stats"), api("/api/runs"), api("/api/logs?limit=50")
+    const [stats, runs, logs, sources, health, keywords, errors] = await Promise.all([
+      api("/api/stats"), api("/api/runs"), api("/api/logs?limit=50"),
+      api("/api/sources"), api("/api/sources/health"), api("/api/keywords"), api("/api/errors?limit=100")
     ]);
     renderStats(stats);
     renderRuns(runs.runs);
     renderLogs(logs.logs);
+    renderSources(sources.sources, health.sources);
+    renderKeywords(keywords.keywords);
+    renderErrors(errors.errors);
   } catch (err) {
     showMessage("Cannot reach the API: " + err.message, "error");
   }
@@ -156,6 +212,60 @@ document.getElementById("runs").addEventListener("click", async (event) => {
   } catch (err) {
     showMessage(`Action "${button.dataset.action}" failed: ${err.message}`, "error");
   }
+});
+
+document.getElementById("addSourceBtn").addEventListener("click", async () => {
+  const name = document.getElementById("srcName").value.trim();
+  const base = document.getElementById("srcUrl").value.trim();
+  if (!name || !base) { showMessage("Source name and base URL are required.", "error"); return; }
+  try {
+    await api("/api/sources", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, base_url: base, source_type: document.getElementById("srcType").value, seed_urls: [base] })
+    });
+    showMessage("Source added.", "ok");
+    refresh();
+  } catch (err) { showMessage("Could not add the source: " + err.message, "error"); }
+});
+
+document.getElementById("sources").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-src-action]");
+  if (!button) return;
+  const id = button.dataset.id;
+  try {
+    if (button.dataset.srcAction === "run") {
+      await api(`/api/sources/${id}/run`, { method: "POST" });
+      showMessage("Crawl started for the source.", "ok");
+    } else {
+      const response = await fetch(`/api/sources/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      showMessage("Source deleted.", "ok");
+    }
+    refresh();
+  } catch (err) { showMessage("Source action failed: " + err.message, "error"); }
+});
+
+document.getElementById("addKeywordBtn").addEventListener("click", async () => {
+  const term = document.getElementById("kwTerm").value.trim();
+  if (!term) { showMessage("Please enter a keyword.", "error"); return; }
+  try {
+    await api("/api/keywords", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term })
+    });
+    document.getElementById("kwTerm").value = "";
+    refresh();
+  } catch (err) { showMessage("Could not add the keyword: " + err.message, "error"); }
+});
+
+document.getElementById("keywords").addEventListener("click", async (event) => {
+  const link = event.target.closest("a[data-kw]");
+  if (!link) return;
+  event.preventDefault();
+  try {
+    const response = await fetch(`/api/keywords/${encodeURIComponent(link.dataset.kw)}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    refresh();
+  } catch (err) { showMessage("Could not delete the keyword: " + err.message, "error"); }
 });
 
 refresh();
